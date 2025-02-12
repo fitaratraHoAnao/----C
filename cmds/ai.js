@@ -17,8 +17,18 @@ module.exports = {
 
         try {
             const response = await axios.get(`https://xnil.xnil.unaux.com/xnil/deepseek?text=${encodeURIComponent(question)}`);
+
             if (response.data.data && response.data.data.msg) {
-                api.sendMessage(`✅🙏 DEEPSEEK CHAT 🙏✅\n\n${response.data.data.msg}`, event.threadID, event.messageID);
+                const fullMessage = `✅🙏 DEEPSEEK CHAT 🙏✅\n\n${response.data.data.msg}`;
+                const maxLength = 2000; // Limite de caractères de Facebook Messenger
+
+                // Découpage du message en morceaux de 2000 caractères
+                for (let i = 0; i < fullMessage.length; i += maxLength) {
+                    const chunk = fullMessage.substring(i, i + maxLength);
+                    await new Promise(resolve => {
+                        api.sendMessage(chunk, event.threadID, () => resolve());
+                    });
+                }
             } else {
                 api.sendMessage("Une erreur s'est produite lors du traitement de votre requête. Veuillez réessayer plus tard.", event.threadID, event.messageID);
             }
