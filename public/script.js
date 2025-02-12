@@ -1,65 +1,56 @@
-const chatBox = document.getElementById("chat-box");
-const userInput = document.getElementById("user-input");
-const fileInput = document.getElementById("file-input");
+document.addEventListener("DOMContentLoaded", () => {
+    const chatBox = document.getElementById("chat-box");
+    const userInput = document.getElementById("user-input");
+    const sendBtn = document.getElementById("send-btn");
+    const fileInput = document.getElementById("file-input");
 
-function appendMessage(text, sender) {
-    const messageDiv = document.createElement("div");
-    messageDiv.classList.add("message", sender);
-    messageDiv.textContent = text;
-    chatBox.appendChild(messageDiv);
-    chatBox.scrollTop = chatBox.scrollHeight;
-}
-
-function sendMessage() {
-    const message = userInput.value.trim();
-    if (message === "") return;
-
-    appendMessage(message, "user");
-    userInput.value = "";
-
-    fetch("https://gemini-sary-prompt-espa-vercel-api.vercel.app/api/gemini", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: message, customId: "web_user" })
-    })
-    .then(response => response.json())
-    .then(data => {
-        appendMessage(data.message, "bot");
-    })
-    .catch(error => console.error("Erreur :", error));
-}
-
-userInput.addEventListener("keypress", function(event) {
-    if (event.key === "Enter") {
-        sendMessage();
+    function appendMessage(sender, text) {
+        const message = document.createElement("div");
+        message.innerHTML = `<strong>${sender}:</strong> ${text}`;
+        chatBox.appendChild(message);
+        chatBox.scrollTop = chatBox.scrollHeight;
     }
-});
 
-fileInput.addEventListener("change", function(event) {
-    const file = event.target.files[0];
-    if (!file) return;
+    sendBtn.addEventListener("click", async () => {
+        const text = userInput.value.trim();
+        if (!text) return;
 
-    const reader = new FileReader();
-    reader.onload = function(e) {
-        const imageUrl = e.target.result;
+        appendMessage("Vous", text);
+        userInput.value = "";
 
-        appendMessage("📷 Image envoyée...", "user");
+        try {
+            const response = await fetch("/chat", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ prompt: text })
+            });
 
-        fetch("https://gemini-sary-prompt-espa-vercel-api.vercel.app/api/gemini", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                link: imageUrl,
-                prompt: "Analyse et description de cette image",
-                customId: "web_user"
-            })
-        })
-        .then(response => response.json())
-        .then(data => {
-            appendMessage(data.message, "bot");
-        })
-        .catch(error => console.error("Erreur :", error));
-    };
+            const data = await response.json();
+            appendMessage("Bot", data.reply);
+        } catch (error) {
+            appendMessage("Bot", "Erreur de connexion !");
+        }
+    });
 
-    reader.readAsDataURL(file);
+    fileInput.addEventListener("change", async () => {
+        const file = fileInput.files[0];
+        if (!file) return;
+
+        appendMessage("Vous", "Image envoyée 📷");
+
+        const formData = new FormData();
+        formData.append("image", file);
+
+        try {
+            const response = await fetch("/image", {
+                method: "POST",
+                body: formData
+            });
+
+            const data = await response.json();
+            appendMessage("Bot", data.reply);
+        } catch (error) {
+            appendMessage("Bot", "Erreur d'analyse de l'image !");
+        }
+    });
 });
