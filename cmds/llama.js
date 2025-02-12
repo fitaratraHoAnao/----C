@@ -19,7 +19,7 @@ module.exports = {
                 const response = await axios.get(`https://xnil.xnil.unaux.com/xnil/blackbox?message=${encodeURIComponent(question)}`);
                 
                 if (response.data.status) {
-                    api.sendMessage(`🤖💡 *Blackbox AI* 💡🤖\n\n${response.data.response}`, event.threadID, event.messageID);
+                    api.sendMessage(`🤖💡 Bot Lycéens 💡🤖\n\n${response.data.response}`, event.threadID, event.messageID);
                 } else {
                     api.sendMessage("❌ Oups ! Une erreur est survenue. Réessayez plus tard.", event.threadID, event.messageID);
                 }
