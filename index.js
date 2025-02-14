@@ -1,38 +1,33 @@
 const login = require("ws3-fca");
 const express = require("express");
 const axios = require("axios");
-const fs = require("fs");
-const path = require("path");
-
 const app = express();
+
+// Charger la configuration depuis config.json
+const fs = require("fs");
 const config = JSON.parse(fs.readFileSync("config.json", "utf8"));
 
+// Charger appstate depuis les variables d'environnement
 let appState = null;
 try {
-    appState = JSON.parse(process.env.APPSTATE);
-    console.log("AppState chargé avec succès.");
+    appState = JSON.parse(process.env.APPSTATE); // Charger depuis la variable d'environnement
+    console.log("Appstate chargé avec succès depuis les variables d'environnement.");
 } catch (error) {
-    console.error("Erreur de chargement d'AppState :", error);
-    process.exit(1);
+    console.error("Échec du chargement de l'appstate depuis l'environnement", error);
+    process.exit(1); // Quitter l'application si appstate n'est pas chargé
 }
 
 const port = config.port || 3000;
 
-// Charger les commandes du dossier cmds
+// Charger les commandes depuis le dossier cmds
+const commandFiles = fs.readdirSync('./cmds').filter(file => file.endsWith('.js'));
 const commands = {};
-fs.readdirSync('./cmds').filter(file => file.endsWith('.js')).forEach(file => {
+commandFiles.forEach(file => {
     const command = require(`./cmds/${file}`);
     commands[command.name] = command;
 });
 
-// Charger les commandes du dossier respimage/
-const respimageCommands = {};
-fs.readdirSync('./respimage').filter(file => file.endsWith('.js')).forEach(file => {
-    const command = require(`./respimage/${file}`);
-    respimageCommands[command.name] = command;
-});
-
-// Stocker les commandes actives par utilisateur
+// Object pour suivre les commandes actives par utilisateur
 let activeCommands = {};
 
 login({ appState }, (err, api) => {
@@ -47,47 +42,25 @@ login({ appState }, (err, api) => {
 
     function handleMessage(event) {
         const prefix = config.prefix;
-        const message = event.body?.trim();
+        const message = event.body;
         const senderId = event.senderID;
         const attachments = event.attachments || [];
 
-        // Vérifier si une commande respimage est active pour cet utilisateur
+        // Vérifier si l'utilisateur a une commande active
         if (activeCommands[senderId]) {
             const activeCommand = activeCommands[senderId];
-
             if (message.toLowerCase() === "stop") {
+                // Désactiver la commande active pour l'utilisateur
                 delete activeCommands[senderId];
                 api.sendMessage(`La commande ${activeCommand} a été désactivée avec succès.`, event.threadID);
                 return;
-            } else if (respimageCommands[activeCommand]) {
-                // Exécuter la commande active pour les messages et les images
-                return respimageCommands[activeCommand].execute(api, event, message, attachments);
+            } else if (commands[activeCommand]) {
+                // Continuer la conversation avec la commande active
+                return commands[activeCommand].execute(api, event, [message]);
             }
         }
 
-        // Vérifier si l'utilisateur tape une commande respimage (gen, image, phi)
-        if (respimageCommands[message]) {
-            activeCommands[senderId] = message;
-            api.sendMessage(`La commande ${message} a été activée avec succès.`, event.threadID);
-            return;
-        }
-
-        // Si le message contient des pièces jointes (images)
-        if (attachments.length > 0 && attachments[0].type === "photo") {
-            api.sendMessage("⏳💫 Analyse de votre image en cours...", event.threadID);
-            const imageUrl = attachments[0].url;
-
-            axios.post('https://gemini-sary-prompt-espa-vercel-api.vercel.app/api/gemini', {
-                link: imageUrl,
-                prompt: "Décrire cette photo",
-                customId: senderId
-            }).then(response => {
-                api.sendMessage(response.data.message, event.threadID);
-            }).catch(err => console.error("Erreur API Gemini :", err));
-
-            return;
-        }
-
+        // Vérifier s'il s'agit d'une commande avec un préfixe
         if (message.startsWith(prefix)) {
             const args = message.slice(prefix.length).split(/ +/);
             const commandName = args.shift().toLowerCase();
@@ -104,16 +77,51 @@ login({ appState }, (err, api) => {
                 // Exécuter la commande sélectionnée
                 return commands[commandName].execute(api, event, args);
             } else {
-                // Si ce n'est pas une commande, envoyer le message à l'API Gemini
-                api.sendMessage("⏳ Veuillez patienter pendant que Bruno traite votre demande...", event.threadID);
-
-                axios.post('https://gemini-sary-prompt-espa-vercel.app/api/gemini', {
+                // Si la commande n'existe pas, utiliser l'API Gemini
+                api.sendMessage("⏳ Veuillez patienter un instant pendant que Bruno traite votre demande...", event.threadID);
+                axios.post('https://gemini-sary-prompt-espa-vercel-api.vercel.app/api/gemini', {
                     prompt: message,
                     customId: senderId
                 }).then(response => {
                     api.sendMessage(response.data.message, event.threadID);
-                }).catch(err => console.error("Erreur API Gemini :", err));
+                }).catch(err => console.error("Erreur API :", err));
             }
+        }
+
+        // Si le message contient des pièces jointes, les traiter avec l'API Gemini
+        if (attachments.length > 0 && attachments[0].type === 'photo') {
+            api.sendMessage("⏳💫 Veuillez patienter un instant pendant que Bruno analyse votre image...", event.threadID);
+
+            const imageUrl = attachments[0].url;
+            axios.post('https://gemini-sary-prompt-espa-vercel-api.vercel.app/api/gemini', {
+                link: imageUrl,
+                prompt: "Analyse du texte de l'image pour détection de mots-clés",
+                customId: senderId
+            }).then(ocrResponse => {
+                const ocrText = ocrResponse.data.message || "";
+                const hasExerciseKeywords = /(\d+\)|[a-zA-Z]\)|Exercice)/.test(ocrText);
+                const prompt = hasExerciseKeywords
+                    ? "Faire cet exercice et donner la correction complète de cet exercice"
+                    : "Décrire cette photo";
+
+                return axios.post('https://gemini-sary-prompt-espa-vercel-api.vercel.app/api/gemini', {
+                    link: imageUrl,
+                    prompt,
+                    customId: senderId
+                });
+            }).then(response => {
+                api.sendMessage(response.data.message, event.threadID);
+            }).catch(err => console.error("Erreur OCR ou réponse :", err));
+        } else if (!message.startsWith(prefix)) {
+            // Si aucun préfixe, fallback à l'API Gemini
+            api.sendMessage("⏳ Veuillez patienter un instant pendant que Bruno traite votre demande...", event.threadID);
+
+            axios.post('https://gemini-sary-prompt-espa-vercel-api.vercel.app/api/gemini', {
+                prompt: message,
+                customId: senderId
+            }).then(response => {
+                api.sendMessage(response.data.message, event.threadID);
+            }).catch(err => console.error("Erreur API :", err));
         }
     }
 
@@ -128,5 +136,5 @@ app.get("/", (req, res) => {
 });
 
 app.listen(port, () => {
-    console.log(`Serveur en cours sur http://localhost:${port}`);
+    console.log(`Le serveur fonctionne sur http://localhost:${port}`);
 });
