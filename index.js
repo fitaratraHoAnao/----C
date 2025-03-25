@@ -78,7 +78,7 @@ login({ appState }, (err, api) => {
                 return commands[commandName].execute(api, event, args);
             } else {
                 // Si la commande n'existe pas, utiliser l'API Gemini
-                api.sendMessage("⏳ Veuillez patienter un instant pendant que Bruno traite votre demande...", event.threadID);
+                api.sendMessage("⏳ Veuillez patienter un instant pendant que l'IA traite votre demande...", event.threadID);
                 axios.post('https://gemini-sary-prompt-espa-vercel-api.vercel.app/api/gemini', {
                     prompt: message,
                     customId: senderId
